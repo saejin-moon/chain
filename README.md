@@ -1,6 +1,6 @@
 # CHAIN — Conformal Heterogeneous Agent Inference Network
 
-A self-contained, local-first **Rust** agent runtime pairing a **4B System-1 decision model** (`vev-4b` / `AgentDecision-4B`) with a **`<10B` System-2 LLM** (`Qwen3.5-9B`, `Qwen3-8B`, or `Llama-3.1-8B`), connected through a closed-loop **Statistical Sensor Bus**, **Speculative `ReversibleTool` Sandbox**, and **BOCPD Context-Rot State Healing**.
+A self-contained, local-first **Rust** agent runtime pairing a **2B System-1 decision model** (`baselabs/joey-1`) with a **`<10B` System-2 LLM** (`Qwen/Qwen3.5-9B`), connected through a closed-loop **Statistical Sensor Bus**, **Speculative `ReversibleTool` Sandbox**, and **BOCPD Context-Rot State Healing**.
 
 ---
 
@@ -8,7 +8,7 @@ A self-contained, local-first **Rust** agent runtime pairing a **4B System-1 dec
 
 1. **Token-Budgeted `StateFrame` (`src/probes/`):**
    - Every tool emits a deterministic `sensor_digest` (capped at `<= 120` tokens, zero LLM calls).
-   - System-1 evaluates a compact `StateFrame` (`~300–500` tokens) plus **12 orthogonal probes** (`P_fwd`, `P_inv`, `P_pert_1..3`, `Noul` rubrics, and `Score` severity) in a single shared-prefix batch.
+   - System-1 evaluates a compact `StateFrame` (`~300–500` tokens) plus **12 orthogonal probes** (`P_fwd`, `P_inv`, `P_pert_1..3`, `Noul` rubrics, and `Score` severity) in one shared-prefix pass.
    - Dynamic candidate sets $\mathcal{A}_t$ combine control-flow meta-actions (`DONE`, `ROLLBACK_LAST`, `ASK_USER`), entity-bound tools (`read_file(path)`, `run_test(name)`), scoped synthesis slots, and `ESCALATE_SYSTEM2`.
 
 2. **Statistical Sensor Bus (`src/stats/`):**
@@ -27,52 +27,53 @@ A self-contained, local-first **Rust** agent runtime pairing a **4B System-1 dec
 
 ---
 
-## Quick Start
+## Quick Start (`baselabs/joey-1` + `Qwen/Qwen3.5-9B`, No GGUF Needed)
 
 ### 1. Prerequisites
 - **Rust:** `rustup` / `cargo` (Edition 2024)
-- **Embedded `llama.cpp` backend (`--features llama-cpp`, optional):** `cmake`, `clang` / `libclang-dev`, and CUDA Toolkit (`nvcc`) for NVIDIA GPUs (or Metal on Apple Silicon).
-- **HTTP backend (`backend = "http"`):** No C++ toolchain required; point [config/runtime.toml](config/runtime.toml) at two running `llama-server` / `vLLM` endpoints.
+- **Python (for model servers):** `pip install torch transformers fastapi uvicorn accelerate vllm`
 
-### 2. Place Models
-Create a `models/` directory (gitignored) and place your GGUF weights there:
+### 2. Hardware / VRAM Requirements
+| Configuration | System-1 (`baselabs/joey-1` 2B) | System-2 (`Qwen/Qwen3.5-9B`) | Total Hardware |
+| :--- | :--- | :--- | :--- |
+| **16 GB VRAM GPU** *(Hybrid)* | ~4.5 GB System RAM (`--device cpu`) | ~7.5–9 GB VRAM (`--quantization bitsandbytes` or `fp8`) | **16 GB VRAM GPU + 16–32 GB RAM** |
+| **24 GB+ VRAM GPU** *(Co-located)* | ~4.5 GB VRAM (`bf16`) | ~11–13 GB VRAM (`fp8` / `awq`) or ~19 GB (`bf16` on 32GB+) | **24 GB VRAM** (`fp8` System-2) or **32 GB+ VRAM** (`bf16`) |
 
-```text
-chain/
-├── config/runtime.toml
-└── models/
-    ├── vev-4b-Q4_K_M.gguf       # System-1 (4B decision model)
-    └── Qwen3-8B-Q4_K_M.gguf     # System-2 (<10B generator)
+### 3. Launch Model Servers
+**Terminal 1 — System-1 (`baselabs/joey-1` on port `8081`):**
+```bash
+python3 scripts/serve_joey.py --model baselabs/joey-1 --port 8081 --device auto --dtype bf16
 ```
 
-Update `backend` (`"mock"`, `"http"`, or `"llama_cpp"`) and `model_path` in [config/runtime.toml](config/runtime.toml).
-
-### 3. Hardware Requirements
-| Mode | System-1 (4B `Q4_K_M`) | System-2 (8B–9B `Q4_K_M` + `q8_0` KV) | Recommended Hardware |
-| :--- | :--- | :--- | :--- |
-| **Hybrid CPU + GPU** | ~3.0–3.5 GB RAM | ~6.5–7.5 GB VRAM | 12–16 GB VRAM GPU + 16–32 GB RAM (8+ physical P-cores) |
-| **Co-located GPU** | ~3.0–3.5 GB VRAM | ~6.5–7.5 GB VRAM | 24 GB+ VRAM GPU or 24 GB+ Apple Silicon Unified Memory |
-
-### 4. Build, Test, and Run
+**Terminal 2 — System-2 (`Qwen/Qwen3.5-9B` via vLLM on port `8082`):**
 ```bash
-# Run unit & integration tests (uses deterministic mock backend)
+vllm serve Qwen/Qwen3.5-9B \
+  --port 8082 \
+  --enable-prefix-caching \
+  --gpu-memory-utilization 0.65 \
+  --max-model-len 16384
+```
+*(On a 24 GB GPU, add `--quantization fp8` or `--quantization bitsandbytes` to leave headroom for `joey-1`.)*
+
+### 4. Configure & Run CHAIN
+Update [config/runtime.toml](config/runtime.toml): set `backend = "http"` under both `[decision_model]` and `[generator_model]`.
+
+```bash
+# Run unit & integration tests (uses mock backend)
 cargo test
 
-# Run the OpenAI-compatible proxy (127.0.0.1:8080)
+# Start the CHAIN proxy on 127.0.0.1:8080
 cargo run --release
 
-# Or build with embedded llama-cpp-2 support
-cargo run --release --features llama-cpp
-
-# Regenerate default Mondrian calibration quantiles
-cargo run -- calibrate
+# Regenerate Mondrian calibration quantiles
+cargo run --release -- calibrate
 ```
 
-### 5. Benchmark Harness
+### 5. Run Benchmarks
 ```bash
 # Dry-run 40-turn Context-Rot Needle generator
 python3 eval/bench_harness.py --dry-run
 
-# Run against a live CHAIN proxy
+# Run against live CHAIN proxy
 python3 eval/bench_harness.py --endpoint http://127.0.0.1:8080 --suite context_rot --count 10
 ```

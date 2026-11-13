@@ -74,7 +74,10 @@ async fn main() {
     let calibration = CalibrationData::from_file("config/calibration.json").unwrap_or_default();
 
     let decision_backend: Arc<dyn DecisionBackend> = match config.decision_model.backend {
-        BackendKind::Http => Arc::new(HttpDecisionBackend::new(&config.decision_model.endpoint)),
+        BackendKind::Http => Arc::new(HttpDecisionBackend::new(
+            &config.decision_model.endpoint,
+            config.decision_model.api_format,
+        )),
         BackendKind::Mock => Arc::new(MockDecisionBackend::new()),
         BackendKind::LlamaCpp => {
             #[cfg(feature = "llama-cpp")]
@@ -99,7 +102,11 @@ async fn main() {
     };
 
     let generator_backend: Arc<dyn GeneratorBackend> = match config.generator_model.backend {
-        BackendKind::Http => Arc::new(HttpGeneratorBackend::new(&config.generator_model.endpoint)),
+        BackendKind::Http => Arc::new(HttpGeneratorBackend::new(
+            &config.generator_model.endpoint,
+            &config.generator_model.model_path,
+            config.generator_model.api_format,
+        )),
         BackendKind::Mock => Arc::new(MockGeneratorBackend::new()),
         BackendKind::LlamaCpp => {
             #[cfg(feature = "llama-cpp")]

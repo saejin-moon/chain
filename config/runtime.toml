@@ -2,21 +2,23 @@
 bind_addr = "127.0.0.1:8080"
 
 [decision_model]
-backend = "mock" # "llama_cpp" | "http" | "mock"
-model_path = "models/AgentDecision-4B-Q4_K_M.gguf"
+backend = "mock" # "http" | "llama_cpp" | "mock"
+api_format = "system_one" # "system_one" (baselabs/joey-1) | "llama_server"
+model_path = "baselabs/joey-1"
 endpoint = "http://127.0.0.1:8081"
-device = "cpu" # "cpu" | "gpu"
+device = "gpu" # "cpu" | "gpu"
 physical_cores = 8
-kv_cache_type = "q8_0"
+kv_cache_type = "bf16"
 max_state_frame_tokens = 500
 max_digest_tokens = 120
 
 [generator_model]
-backend = "mock" # "llama_cpp" | "http" | "mock"
-model_path = "models/Qwen3-8B-Q4_K_M.gguf"
+backend = "mock" # "http" | "llama_cpp" | "mock"
+api_format = "open_ai" # "open_ai" (vLLM Qwen/Qwen3.5-9B) | "llama_server"
+model_path = "Qwen/Qwen3.5-9B"
 endpoint = "http://127.0.0.1:8082"
 device = "gpu"
-kv_cache_type = "q8_0"
+kv_cache_type = "fp8"
 max_verify_tokens = 64
 max_synthesis_tokens = 512
 

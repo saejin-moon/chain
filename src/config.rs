@@ -42,9 +42,20 @@ pub enum DeviceTarget {
     Gpu,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum HttpApiFormat {
+    #[default]
+    LlamaServer,
+    SystemOne,
+    OpenAi,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecisionModelConfig {
     pub backend: BackendKind,
+    #[serde(default)]
+    pub api_format: HttpApiFormat,
     pub model_path: String,
     pub endpoint: String,
     pub device: DeviceTarget,
@@ -57,6 +68,8 @@ pub struct DecisionModelConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeneratorModelConfig {
     pub backend: BackendKind,
+    #[serde(default)]
+    pub api_format: HttpApiFormat,
     pub model_path: String,
     pub endpoint: String,
     pub device: DeviceTarget,
@@ -104,20 +117,22 @@ impl Default for RuntimeConfig {
             },
             decision_model: DecisionModelConfig {
                 backend: BackendKind::Mock,
-                model_path: "models/AgentDecision-4B-Q4_K_M.gguf".to_string(),
+                api_format: HttpApiFormat::SystemOne,
+                model_path: "baselabs/joey-1".to_string(),
                 endpoint: "http://127.0.0.1:8081".to_string(),
-                device: DeviceTarget::Cpu,
+                device: DeviceTarget::Gpu,
                 physical_cores: 8,
-                kv_cache_type: "q8_0".to_string(),
+                kv_cache_type: "bf16".to_string(),
                 max_state_frame_tokens: 500,
                 max_digest_tokens: 120,
             },
             generator_model: GeneratorModelConfig {
                 backend: BackendKind::Mock,
-                model_path: "models/Qwen3-8B-Q4_K_M.gguf".to_string(),
+                api_format: HttpApiFormat::OpenAi,
+                model_path: "Qwen/Qwen3.5-9B".to_string(),
                 endpoint: "http://127.0.0.1:8082".to_string(),
                 device: DeviceTarget::Gpu,
-                kv_cache_type: "q8_0".to_string(),
+                kv_cache_type: "fp8".to_string(),
                 max_verify_tokens: 64,
                 max_synthesis_tokens: 512,
             },
