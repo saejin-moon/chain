@@ -31,7 +31,7 @@ A self-contained, local-first **Rust** agent runtime pairing a **2B System-1 dec
 
 ### 1. Prerequisites
 - **Rust:** `rustup` / `cargo` (Edition 2024)
-- **Python (for model servers):** `pip install torch transformers fastapi uvicorn accelerate vllm`
+- **Python (`uv`):** [uv](https://docs.astral.sh/uv/) (`uv sync` installs `torch`, `transformers`, `fastapi`, `uvicorn`, `accelerate`, `vllm` from [pyproject.toml](pyproject.toml))
 
 ### 2. Hardware / VRAM Requirements
 | Configuration | System-1 (`baselabs/joey-1` 2B) | System-2 (`Qwen/Qwen3.5-9B`) | Total Hardware |
@@ -40,14 +40,19 @@ A self-contained, local-first **Rust** agent runtime pairing a **2B System-1 dec
 | **24 GB+ VRAM GPU** *(Co-located)* | ~4.5 GB VRAM (`bf16`) | ~11–13 GB VRAM (`fp8` / `awq`) or ~19 GB (`bf16` on 32GB+) | **24 GB VRAM** (`fp8` System-2) or **32 GB+ VRAM** (`bf16`) |
 
 ### 3. Launch Model Servers
+First sync the Python environment:
+```bash
+uv sync
+```
+
 **Terminal 1 — System-1 (`baselabs/joey-1` on port `8081`):**
 ```bash
-python3 scripts/serve_joey.py --model baselabs/joey-1 --port 8081 --device auto --dtype bf16
+uv run scripts/serve_joey.py --model baselabs/joey-1 --port 8081 --device auto --dtype bf16
 ```
 
 **Terminal 2 — System-2 (`Qwen/Qwen3.5-9B` via vLLM on port `8082`):**
 ```bash
-vllm serve Qwen/Qwen3.5-9B \
+uv run vllm serve Qwen/Qwen3.5-9B \
   --port 8082 \
   --enable-prefix-caching \
   --gpu-memory-utilization 0.65 \
@@ -72,8 +77,8 @@ cargo run --release -- calibrate
 ### 5. Run Benchmarks
 ```bash
 # Dry-run 40-turn Context-Rot Needle generator
-python3 eval/bench_harness.py --dry-run
+uv run eval/bench_harness.py --dry-run
 
 # Run against live CHAIN proxy
-python3 eval/bench_harness.py --endpoint http://127.0.0.1:8080 --suite context_rot --count 10
+uv run eval/bench_harness.py --endpoint http://127.0.0.1:8080 --suite context_rot --count 10
 ```

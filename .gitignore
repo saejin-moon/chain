@@ -1,6 +1,9 @@
 /target/
 /models/
 /.chain_tx/
+/.venv/
+__pycache__/
+*.pyc
 *.gguf
 *.db
 *.db-wal

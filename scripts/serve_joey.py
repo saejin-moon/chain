@@ -4,7 +4,7 @@ Lightweight System-1 HTTP server for `baselabs/joey-1` (2B Qwen3.5-based decisio
 Exposes POST /v1/systemone/batch for CHAIN's 12-probe orthogonal sensor bus.
 
 Requirements:
-  pip install torch transformers fastapi uvicorn accelerate
+  uv sync && uv run scripts/serve_joey.py
 """
 
 import argparse
