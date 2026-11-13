@@ -1,0 +1,33 @@
+[package]
+name = "chain"
+version = "0.1.0"
+edition = "2024"
+description = "CHAIN: Conformal Heterogeneous Agent Inference Network — local-first System-1 + System-2 Rust agent runtime"
+
+[features]
+default = []
+llama-cpp = ["dep:llama-cpp-2"]
+
+[dependencies]
+async-trait = "0.1"
+axum = "0.8"
+bytes = "1"
+core_affinity = "0.8"
+llama-cpp-2 = { version = "0.1", optional = true }
+rand = "0.8"
+reflink-copy = "0.1"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+rusqlite = { version = "0.35", features = ["bundled"] }
+rustc-hash = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+sha2 = "0.10"
+smallvec = { version = "1", features = ["serde"] }
+statrs = "0.18"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v7", "serde"] }
