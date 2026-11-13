@@ -1,10 +1,21 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#   "accelerate>=1.0.0",
+#   "fastapi>=0.115.0",
+#   "pydantic>=2.0.0",
+#   "torch>=2.5.0",
+#   "transformers>=5.0.0",
+#   "uvicorn>=0.32.0",
+# ]
+# ///
 """
 Lightweight System-1 HTTP server for `baselabs/joey-1` (2B Qwen3.5-based decision model).
 Exposes POST /v1/systemone/batch for CHAIN's 12-probe orthogonal sensor bus.
 
-Requirements:
-  uv sync && uv run scripts/serve_joey.py
+Run in an isolated uv environment (avoids vllm's transformers v4 pin):
+  uv run --no-project scripts/serve_joey.py --model baselabs/joey-1 --port 8081 --device cpu --dtype fp32
 """
 
 import argparse

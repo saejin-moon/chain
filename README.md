@@ -45,9 +45,9 @@ First sync the Python environment:
 uv sync
 ```
 
-**Terminal 1 — System-1 (`baselabs/joey-1` on port `8081`):**
+**Terminal 1 — System-1 (`baselabs/joey-1` on port `8081`, isolated `transformers>=5` via `--no-project`):**
 ```bash
-uv run scripts/serve_joey.py --model baselabs/joey-1 --port 8081 --device auto --dtype bf16
+uv run --no-project scripts/serve_joey.py --model baselabs/joey-1 --port 8081 --device cpu --dtype fp32
 ```
 
 **Terminal 2 — System-2 (`Qwen/Qwen3.5-9B` via vLLM on port `8082`):**
