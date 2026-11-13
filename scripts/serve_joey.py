@@ -26,7 +26,7 @@ import torch.nn.functional as F
 from fastapi import FastAPI
 from pydantic import BaseModel
 import uvicorn
-from transformers import AutoModelForCausalLM, AutoProcessor
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 try:
     from transformers import AutoModelForMultimodalLM as JoeyAutoModel
@@ -54,8 +54,7 @@ def create_app(model_id: str, device: str, dtype_str: str) -> FastAPI:
     dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[dtype_str]
 
     print(f"Loading {model_id} on {device} ({dtype_str})...")
-    processor = AutoProcessor.from_pretrained(model_id)
-    tokenizer = getattr(processor, "tokenizer", processor)
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
     model = JoeyAutoModel.from_pretrained(
         model_id,
         torch_dtype=dtype,
