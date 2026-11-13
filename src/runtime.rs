@@ -319,9 +319,17 @@ impl ChainRuntime {
                         .generate_scoped(GeneratorSlot::ScopedSynthesis, prompt, abort)
                         .await
                     {
-                        memory.record_turn(turn, cand.description.clone(), resp);
+                        memory.record_turn(turn, cand.description.clone(), resp.clone());
+                        if recent_history.len() >= 3 {
+                            recent_history.pop_front();
+                        }
+                        recent_history.push_back(ActionOutcomeDigest {
+                            turn,
+                            action: format!("sys2({})", cand.description),
+                            sensor_digest: resp.chars().take(120).collect(),
+                        });
                     }
-                    idx
+                    continue;
                 }
                 RouteDecision::AskUser { reason } => {
                     metrics.avg_probe_latency_us = total_probe_us / metrics.turns.max(1) as u64;
@@ -337,6 +345,10 @@ impl ChainRuntime {
             let cand = &candidates[chosen_idx];
             match &cand.kind {
                 ActionKind::MetaDone => {
+                    if memory.ephemeral_turns.is_empty() && !observed_files.is_empty() && turn < max_turns {
+                        // Force at least one inspection turn before allowing DONE when files exist
+                        continue;
+                    }
                     metrics.avg_probe_latency_us = total_probe_us / metrics.turns.max(1) as u64;
                     return EpisodeResult {
                         completed: true,

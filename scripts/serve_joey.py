@@ -19,6 +19,8 @@ Run in an isolated uv environment (avoids vllm's transformers v4 pin):
 """
 
 import argparse
+import copy
+import time
 from typing import Dict, List
 
 import torch
@@ -55,6 +57,8 @@ def create_app(model_id: str, device: str, dtype_str: str) -> FastAPI:
 
     print(f"Loading {model_id} on {device} ({dtype_str})...")
     tokenizer = AutoTokenizer.from_pretrained(model_id)
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token_id = tokenizer.eos_token_id
     model = JoeyAutoModel.from_pretrained(
         model_id,
         torch_dtype=dtype,
@@ -71,28 +75,67 @@ def create_app(model_id: str, device: str, dtype_str: str) -> FastAPI:
     @app.post("/v1/systemone/batch")
     @torch.no_grad()
     def eval_batch(req: BatchReq) -> Dict[str, Dict[str, List[float]]]:
+        t0 = time.perf_counter()
+        if not req.probes:
+            return {"results": {}}
+
         shared_text = f"{req.prefix}\n{req.state_frame}"
         shared_ids = tokenizer(shared_text, return_tensors="pt").input_ids.to(model.device)
-        prefix_out = model(input_ids=shared_ids, use_cache=True)
-        past_kv = prefix_out.past_key_values
+        bsz = len(req.probes)
+        pad_id = tokenizer.pad_token_id or 0
+
+        suffix_lists = [
+            tokenizer.encode(p.suffix, add_special_tokens=False) for p in req.probes
+        ]
+        max_suf = max(len(s) for s in suffix_lists)
+        suffix_tensor = torch.full((bsz, max_suf), pad_id, dtype=torch.long, device=model.device)
+        suffix_mask = torch.zeros((bsz, max_suf), dtype=torch.long, device=model.device)
+        last_indices = []
+        for i, s in enumerate(suffix_lists):
+            slen = len(s)
+            suffix_tensor[i, :slen] = torch.tensor(s, dtype=torch.long, device=model.device)
+            suffix_mask[i, :slen] = 1
+            last_indices.append(max(slen - 1, 0))
+
+        # Try single batched forward pass using shared prefix KV cache; fall back to full padded batch.
+        try:
+            prefix_out = model(input_ids=shared_ids, use_cache=True)
+            past_kv = copy.deepcopy(prefix_out.past_key_values)
+            if hasattr(past_kv, "batch_repeat_interleave"):
+                past_kv.batch_repeat_interleave(bsz)
+            else:
+                raise AttributeError("DynamicCache lacks batch_repeat_interleave")
+            prefix_mask = torch.ones(
+                (bsz, shared_ids.shape[1]), dtype=torch.long, device=model.device
+            )
+            full_mask = torch.cat([prefix_mask, suffix_mask], dim=1)
+            out = model(
+                input_ids=suffix_tensor,
+                attention_mask=full_mask,
+                past_key_values=past_kv,
+                use_cache=False,
+            )
+        except Exception:
+            shared_batch = shared_ids.expand(bsz, -1)
+            full_ids = torch.cat([shared_batch, suffix_tensor], dim=1)
+            prefix_mask = torch.ones_like(shared_batch)
+            full_mask = torch.cat([prefix_mask, suffix_mask], dim=1)
+            last_indices = [shared_ids.shape[1] + idx for idx in last_indices]
+            out = model(input_ids=full_ids, attention_mask=full_mask, use_cache=False)
 
         results: Dict[str, List[float]] = {}
-        for probe in req.probes:
-            suffix_ids = tokenizer(
-                probe.suffix, add_special_tokens=False, return_tensors="pt"
-            ).input_ids.to(model.device)
-            out = model(input_ids=suffix_ids, past_key_values=past_kv, use_cache=False)
-            last_logits = out.logits[0, -1, :]
-
+        for i, probe in enumerate(req.probes):
+            last_logits = out.logits[i, last_indices[i], :]
             choice_logits = []
             for c in probe.choices:
                 tok_ids = tokenizer.encode(c.strip(), add_special_tokens=False)
                 tid = tok_ids[0] if tok_ids else tokenizer.unk_token_id
                 choice_logits.append(last_logits[tid].float())
-
             probs = F.softmax(torch.stack(choice_logits), dim=0).tolist()
             results[probe.id] = probs
 
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        print(f"[joey-1] batched {bsz} probes in {elapsed_ms:.1f}ms")
         return {"results": results}
 
     return app

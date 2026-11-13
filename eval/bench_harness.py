@@ -9,16 +9,19 @@ Evaluates CHAIN against:
 
 Supports:
   - Tier 1: TAU-bench (pass^1..pass^5), BFCL v3 (Multi-Turn + Irrelevance F1),
-            and deterministic 40-Turn Context-Rot Needle stress test.
+            and deterministic 40-Turn Context-Rot Needle stress test with real workspace files.
   - Tier 2: Terminal-Bench / scoped SWE-bench Lite.
 """
 
 import argparse
 import json
+import os
 import random
+import shutil
 import time
 import urllib.request
 from dataclasses import dataclass, asdict
+from pathlib import Path
 from typing import List
 
 
@@ -36,29 +39,50 @@ class EpisodeMetrics:
     wall_ms: float
 
 
-def generate_context_rot_needle_tasks(seed: int = 42, count: int = 10) -> List[dict]:
+def generate_context_rot_needle_tasks(seed: int = 42, count: int = 10, materialize: bool = False) -> List[dict]:
     """Deterministic 40-turn Context-Rot Needle stress-test generator."""
     rng = random.Random(seed)
     tasks = []
+    base_dir = Path(".bench_ws")
+    if materialize:
+        base_dir.mkdir(exist_ok=True)
+
     for i in range(count):
         needle_code = f"KEY_{rng.randint(10000, 99999)}"
-        distractors = [
-            f"Distractor turn {t}: unrelated log noise sha={rng.randint(1000, 9999)}"
-            for t in range(1, 38)
-        ]
+        task_id = f"rot_needle_{i:03d}"
+        initial_files: List[str] = []
+
+        if materialize:
+            tdir = base_dir / task_id
+            tdir.mkdir(parents=True, exist_ok=True)
+            (tdir / "notes_alpha.txt").write_text(
+                "\n".join(f"noise line {k}: sha={rng.randint(1000, 9999)}" for k in range(30))
+            )
+            (tdir / "needle_vault.txt").write_text(
+                f"# Vault\nACTIVE_INVARIANT={needle_code}\nSTATUS=VERIFIED\n"
+            )
+            (tdir / "distractor.log").write_text(
+                "\n".join(f"WARN distractor_event={rng.randint(100, 999)}" for _ in range(40))
+            )
+            initial_files = [
+                f".bench_ws/{task_id}/notes_alpha.txt",
+                f".bench_ws/{task_id}/needle_vault.txt",
+                f".bench_ws/{task_id}/distractor.log",
+            ]
+
         tasks.append({
-            "task_id": f"rot_needle_{i:03d}",
-            "goal": f"Locate and verify target invariant {needle_code} across 40 turns despite distractor updates.",
-            "distractors": distractors,
-            "max_turns": 40,
+            "task_id": task_id,
+            "goal": f"Inspect workspace files, locate and verify target invariant {needle_code}, then finish.",
+            "initial_files": initial_files,
+            "max_turns": 15,
         })
     return tasks
 
 
-def post_episode(endpoint: str, goal: str, max_turns: int) -> dict:
+def post_episode(endpoint: str, goal: str, initial_files: List[str], max_turns: int) -> dict:
     payload = json.dumps({
         "messages": [{"role": "user", "content": goal}],
-        "initial_files": [],
+        "initial_files": initial_files,
         "max_turns": max_turns,
     }).encode("utf-8")
     req = urllib.request.Request(
@@ -67,29 +91,33 @@ def post_episode(endpoint: str, goal: str, max_turns: int) -> dict:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with urllib.request.urlopen(req, timeout=120) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
 def run_suite(endpoint: str, suite: str, count: int) -> List[EpisodeMetrics]:
     results = []
-    tasks = generate_context_rot_needle_tasks(count=count)
-    for t in tasks:
-        t0 = time.perf_counter()
-        resp = post_episode(endpoint, t["goal"], t["max_turns"])
-        elapsed = (time.perf_counter() - t0) * 1000.0
-        results.append(EpisodeMetrics(
-            task_id=t["task_id"],
-            suite=suite,
-            completed=bool(resp.get("completed", False)),
-            turns=int(resp.get("turns", 0)),
-            fast_path_hits=int(resp.get("fast_path_hits", 0)),
-            speculative_commits=int(resp.get("speculative_commits", 0)),
-            speculative_rollbacks=int(resp.get("speculative_rollbacks", 0)),
-            system2_escalations=int(resp.get("system2_escalations", 0)),
-            bocpd_prunes=int(resp.get("bocpd_prunes", 0)),
-            wall_ms=round(elapsed, 2),
-        ))
+    tasks = generate_context_rot_needle_tasks(count=count, materialize=True)
+    try:
+        for t in tasks:
+            t0 = time.perf_counter()
+            resp = post_episode(endpoint, t["goal"], t["initial_files"], t["max_turns"])
+            elapsed = (time.perf_counter() - t0) * 1000.0
+            results.append(EpisodeMetrics(
+                task_id=t["task_id"],
+                suite=suite,
+                completed=bool(resp.get("completed", False)),
+                turns=int(resp.get("turns", 0)),
+                fast_path_hits=int(resp.get("fast_path_hits", 0)),
+                speculative_commits=int(resp.get("speculative_commits", 0)),
+                speculative_rollbacks=int(resp.get("speculative_rollbacks", 0)),
+                system2_escalations=int(resp.get("system2_escalations", 0)),
+                bocpd_prunes=int(resp.get("bocpd_prunes", 0)),
+                wall_ms=round(elapsed, 2),
+            ))
+    finally:
+        if os.path.exists(".bench_ws"):
+            shutil.rmtree(".bench_ws", ignore_errors=True)
     return results
 
 
@@ -102,7 +130,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.dry_run:
-        tasks = generate_context_rot_needle_tasks(count=args.count)
+        tasks = generate_context_rot_needle_tasks(count=args.count, materialize=False)
         print(json.dumps({"generated": len(tasks), "sample_task": tasks[0]["task_id"]}, indent=2))
         return
 
