@@ -15,12 +15,31 @@ use crate::stats::bocpd::BocpdDetector;
 use crate::stats::conformal::ConformalEstimator;
 use crate::stats::dirichlet::DirichletEstimator;
 use crate::stats::routing::{BayesRouter, RouteDecision};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::{Arc, atomic::AtomicBool};
 use uuid::Uuid;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TurnTrace {
+    pub turn: usize,
+    pub route: String,
+    pub top1_action: String,
+    pub top1_prob: f64,
+    pub runner_up_prob: f64,
+    pub conformal_set: Vec<String>,
+    pub q_hat: f64,
+    pub d_js: f64,
+    pub contradiction: bool,
+    pub r_precond: f64,
+    pub r_reversible: f64,
+    pub r_progress: f64,
+    pub r_aligned: f64,
+    pub bocpd_short_prob: f64,
+    pub probe_ms: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeMetrics {
     pub turns: usize,
     pub fast_path_hits: usize,
@@ -29,6 +48,7 @@ pub struct RuntimeMetrics {
     pub system2_escalations: usize,
     pub bocpd_prunes: usize,
     pub avg_probe_latency_us: u64,
+    pub trace: Vec<TurnTrace>,
 }
 
 #[derive(Debug, Clone)]
@@ -126,6 +146,7 @@ impl ChainRuntime {
             system2_escalations: 0,
             bocpd_prunes: 0,
             avg_probe_latency_us: 0,
+            trace: Vec::new(),
         };
 
         for turn in 1..=max_turns {
@@ -234,14 +255,48 @@ impl ChainRuntime {
             }
 
             let decision = self.router.route(&batch, &dir, &conf, &candidates);
-            tracing::info!(
+            let mut sorted_p: Vec<f64> = dir.posterior_mean[..candidates.len()].to_vec();
+            sorted_p.sort_by(|a, b| b.total_cmp(a));
+            let top1_p = sorted_p.first().copied().unwrap_or(0.0);
+            let second_p = sorted_p.get(1).copied().unwrap_or(0.0);
+            let cset_labels: Vec<String> = conf
+                .prediction_set
+                .iter()
+                .filter_map(|&i| candidates.get(i).map(|c| format!("{}:{}", c.label, c.description)))
+                .collect();
+            let step_trace = TurnTrace {
                 turn,
-                ?decision,
-                conformal_len = conf.prediction_set.len(),
-                d_js = format!("{:.3}", dir.d_js),
-                top1 = %candidates[dir.top1_idx].description,
-                "CHAIN routing step"
+                route: format!("{decision:?}"),
+                top1_action: candidates[dir.top1_idx].description.clone(),
+                top1_prob: (top1_p * 1000.0).round() / 1000.0,
+                runner_up_prob: (second_p * 1000.0).round() / 1000.0,
+                conformal_set: cset_labels,
+                q_hat: (conf.q_hat_used * 1000.0).round() / 1000.0,
+                d_js: (dir.d_js * 1000.0).round() / 1000.0,
+                contradiction: dir.contradiction_flagged,
+                r_precond: (batch.r_precond * 1000.0).round() / 1000.0,
+                r_reversible: (batch.r_reversible * 1000.0).round() / 1000.0,
+                r_progress: (batch.r_progress * 1000.0).round() / 1000.0,
+                r_aligned: (batch.r_aligned * 1000.0).round() / 1000.0,
+                bocpd_short_prob: (bocpd_upd.short_run_prob * 1000.0).round() / 1000.0,
+                probe_ms: (batch.latency_us as f64 / 100.0).round() / 10.0,
+            };
+            tracing::info!(
+                turn = step_trace.turn,
+                route = %step_trace.route,
+                top1 = %step_trace.top1_action,
+                p1 = step_trace.top1_prob,
+                p2 = step_trace.runner_up_prob,
+                cset = ?step_trace.conformal_set,
+                q_hat = step_trace.q_hat,
+                d_js = step_trace.d_js,
+                contradiction = step_trace.contradiction,
+                r_pre = step_trace.r_precond,
+                r_rev = step_trace.r_reversible,
+                probe_ms = step_trace.probe_ms,
+                "CHAIN turn telemetry"
             );
+            metrics.trace.push(step_trace);
             let chosen_idx = match decision {
                 RouteDecision::FastPath { action_idx } => {
                     metrics.fast_path_hits += 1;

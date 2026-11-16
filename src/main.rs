@@ -56,6 +56,7 @@ struct ChatCompletionResp {
     speculative_rollbacks: usize,
     system2_escalations: usize,
     bocpd_prunes: usize,
+    trace: Vec<chain::runtime::TurnTrace>,
 }
 
 #[tokio::main]
@@ -185,6 +186,7 @@ async fn handle_chat_completions(
         speculative_rollbacks: res.metrics.speculative_rollbacks,
         system2_escalations: res.metrics.system2_escalations,
         bocpd_prunes: res.metrics.bocpd_prunes,
+        trace: res.metrics.trace,
     })
 }
 

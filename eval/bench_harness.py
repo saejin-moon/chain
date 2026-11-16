@@ -30,6 +30,7 @@ class EpisodeMetrics:
     task_id: str
     suite: str
     completed: bool
+    summary: str
     turns: int
     fast_path_hits: int
     speculative_commits: int
@@ -37,6 +38,7 @@ class EpisodeMetrics:
     system2_escalations: int
     bocpd_prunes: int
     wall_ms: float
+    trace: list
 
 
 def generate_context_rot_needle_tasks(seed: int = 42, count: int = 10, materialize: bool = False) -> List[dict]:
@@ -107,6 +109,7 @@ def run_suite(endpoint: str, suite: str, count: int) -> List[EpisodeMetrics]:
                 task_id=t["task_id"],
                 suite=suite,
                 completed=bool(resp.get("completed", False)),
+                summary=str(resp.get("summary", "")),
                 turns=int(resp.get("turns", 0)),
                 fast_path_hits=int(resp.get("fast_path_hits", 0)),
                 speculative_commits=int(resp.get("speculative_commits", 0)),
@@ -114,6 +117,7 @@ def run_suite(endpoint: str, suite: str, count: int) -> List[EpisodeMetrics]:
                 system2_escalations=int(resp.get("system2_escalations", 0)),
                 bocpd_prunes=int(resp.get("bocpd_prunes", 0)),
                 wall_ms=round(elapsed, 2),
+                trace=resp.get("trace", []),
             ))
     finally:
         if os.path.exists(".bench_ws"):

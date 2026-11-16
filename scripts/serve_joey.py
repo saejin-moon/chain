@@ -136,9 +136,16 @@ def create_app(model_id: str, device: str, dtype_str: str) -> FastAPI:
             results[probe.id] = probs
 
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        fwd_probs = results.get("p_fwd", [])
-        top_str = f"{max(fwd_probs):.2f}" if fwd_probs else "n/a"
-        print(f"[joey-1] evaluated {len(req.probes)} probes in {elapsed_ms:.1f}ms (top_p_fwd={top_str})")
+        fwd = [round(x, 3) for x in results.get("p_fwd", [])]
+        inv = [round(x, 3) for x in results.get("p_inv", [])]
+        pre = round(results.get("r_precond", [0.0])[0], 3)
+        rev = round(results.get("r_reversible", [0.0])[0], 3)
+        prog = round(results.get("r_progress", [0.0])[0], 3)
+        print(
+            f"[joey-1] {len(req.probes)} probes in {elapsed_ms:.1f}ms | "
+            f"p_fwd={fwd} p_inv={inv} r_pre={pre} r_rev={rev} r_prog={prog}",
+            flush=True,
+        )
         return {"results": results}
 
     return app
