@@ -120,6 +120,9 @@ impl ChainRuntime {
     ) -> EpisodeResult {
         let tier0_sys1 = StateFrame::build_tier0_static(goal, &self.tools.compact_summary());
         let _ = self.decision_backend.pin_static_prefix(&tier0_sys1).await;
+        self.conformal.reset_episode_drift();
+        self.bocpd.reset();
+        self.router.reset_sprt();
         let tier0_sys2: Arc<str> = Arc::from(format!(
             "You are CHAIN System-2 verifier/synthesizer. GOAL: {goal}"
         ));

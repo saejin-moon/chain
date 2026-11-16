@@ -114,24 +114,14 @@ def create_app(model_id: str, device: str, dtype_str: str) -> FastAPI:
 
             raw_logits_map[probe.id] = torch.stack(choice_logits)
 
-        # Contextual prior calibration across choice probes (removes position-"A" token bias)
-        choice_probe_ids = [
-            pid for pid in ("p_fwd", "p_inv", "p_pert_1", "p_pert_2", "p_pert_3")
-            if pid in raw_logits_map
-        ]
-        if len(choice_probe_ids) >= 2:
-            mean_prior = torch.stack([raw_logits_map[pid] for pid in choice_probe_ids]).mean(dim=0)
-            for pid in choice_probe_ids:
-                if pid == "p_inv":
-                    # Inverse probe: flip deviation from prior so it doesn't falsely mirror p_fwd's argmax
-                    raw_logits_map[pid] = -(raw_logits_map[pid] - mean_prior)
-                else:
-                    raw_logits_map[pid] = raw_logits_map[pid] - 0.75 * mean_prior
+        # De-correlate inverse probe from forward lexical prior without flattening p_fwd/p_pert
+        if "p_inv" in raw_logits_map and "p_fwd" in raw_logits_map:
+            raw_logits_map["p_inv"] = raw_logits_map["p_inv"] - raw_logits_map["p_fwd"]
 
         results: Dict[str, List[float]] = {}
         for probe in req.probes:
             logits_vec = raw_logits_map[probe.id]
-            temp = 0.25 if probe.id.startswith("p_") else 0.50
+            temp = 0.15 if probe.id.startswith("p_") else 0.35
             probs = F.softmax(logits_vec / temp, dim=0).tolist()
             results[probe.id] = probs
 

@@ -122,13 +122,15 @@ pub fn build_candidate_actions(
             false,
         );
     }
-    push_act(
-        "DONE".to_string(),
-        ActionKind::MetaDone,
-        RiskGroup::PureRead,
-        true,
-        false,
-    );
+    if observed_files.is_empty() {
+        push_act(
+            "DONE".to_string(),
+            ActionKind::MetaDone,
+            RiskGroup::PureRead,
+            true,
+            false,
+        );
+    }
     push_act(
         "ESCALATE_SYSTEM2".to_string(),
         ActionKind::EscalateSystem2,

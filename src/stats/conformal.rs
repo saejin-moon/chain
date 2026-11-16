@@ -112,12 +112,21 @@ impl ConformalEstimator {
         let mut max_q = 0.0f64;
 
         let mut top1_prob = 1e-9f64;
+        let mut second_prob = 0.0f64;
         for &p in posterior_mean.iter().take(k) {
             if p > top1_prob {
+                second_prob = top1_prob;
                 top1_prob = p;
+            } else if p > second_prob {
+                second_prob = p;
             }
         }
-        let top1_score = 1.0 - top1_prob;
+        // Non-conformity of top-1 is the ratio of runner-up to top-1 (0 = total certainty, 1 = tie)
+        let top1_score = if k > 1 {
+            (second_prob / top1_prob).clamp(0.0, 1.0)
+        } else {
+            0.01
+        };
 
         for i in 0..k {
             // Relative non-conformity 1 - (p_i / p_top1) is scale-invariant across K=2..16 candidates:
@@ -193,6 +202,12 @@ impl ConformalEstimator {
             .min(self.online_len - 1);
         let (_, val, _) = scratch[..self.online_len].select_nth_unstable_by(idx, |a, b| a.total_cmp(b));
         Some(*val)
+    }
+
+    pub fn reset_episode_drift(&mut self) {
+        self.martingale = 1.0;
+        self.p_val_len = 0;
+        self.p_val_cursor = 0;
     }
 
     fn smoothed_p_value(&self, s_t: f64) -> f64 {
