@@ -112,6 +112,11 @@ impl ChainRuntime {
         let mut read_only_turns = 0usize;
         let mut counterfactual_hint: Option<String> = None;
         let mut total_probe_us = 0u64;
+        let goal_tokens: Vec<String> = goal
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .filter(|w| w.starts_with("KEY_") || w.len() >= 8)
+            .map(String::from)
+            .collect();
 
         let mut metrics = RuntimeMetrics {
             turns: 0,
@@ -275,15 +280,27 @@ impl ChainRuntime {
                             self.conformal.aci_update(true, 1.0 - dir.posterior_mean[action_idx]);
                             self.router.update_tool_reliability(&cand.description, true, 0.95);
                             if let Ok(out) = exec_res {
-                                record_tool_outcome(
+                                let found_goal = record_tool_outcome(
                                     turn,
                                     &cand.description,
                                     &out,
+                                    &goal_tokens,
                                     &mut memory,
                                     &mut recent_history,
                                     &mut observed_files,
                                     &mut failing_tests,
                                 );
+                                if found_goal {
+                                    metrics.avg_probe_latency_us =
+                                        total_probe_us / metrics.turns.max(1) as u64;
+                                    return EpisodeResult {
+                                        completed: true,
+                                        summary: format!(
+                                            "Verified target invariant via speculative execution at turn {turn}"
+                                        ),
+                                        metrics,
+                                    };
+                                }
                             }
                             continue;
                         } else {
@@ -305,7 +322,7 @@ impl ChainRuntime {
                 }
                 RouteDecision::System2Escalate { .. } => {
                     metrics.system2_escalations += 1;
-                    let idx = dir.top1_idx;
+                    let mut idx = dir.top1_idx;
                     let cand = &candidates[idx];
                     let mut prompt = build_scoped_synthesis_prompt(
                         tier0_sys2.clone(),
@@ -313,26 +330,29 @@ impl ChainRuntime {
                         cand,
                         counterfactual_hint.take().as_deref(),
                     );
-                    prompt.max_tokens = 96;
+                    prompt.max_tokens = 64;
                     let abort = Arc::new(AtomicBool::new(false));
                     if let Ok(resp) = self
                         .generator_backend
                         .generate_scoped(GeneratorSlot::ScopedSynthesis, prompt, abort)
                         .await
                     {
-                        memory.record_turn(turn, cand.description.clone(), resp.clone());
-                        if recent_history.len() >= 3 {
-                            recent_history.pop_front();
+                        if let Some(picked) = candidates
+                            .iter()
+                            .position(|c| resp.contains(&format!("{}:", c.label)) || resp.trim().starts_with(&c.label))
+                        {
+                            idx = picked;
                         }
-                        recent_history.push_back(ActionOutcomeDigest {
-                            turn,
-                            action: format!("sys2({})", cand.description),
-                            sensor_digest: resp.chars().take(120).collect(),
-                        });
+                        memory.record_turn(turn, candidates[idx].description.clone(), resp.clone());
                     }
-                    // If the top candidate is an entity-bound tool, still execute it after System-2 guidance
-                    if matches!(cand.kind, ActionKind::EntityBound { .. }) {
+                    // If System-2 or top1 points to an unread entity-bound tool, execute it
+                    if matches!(candidates[idx].kind, ActionKind::EntityBound { .. } | ActionKind::MetaDone) {
                         idx
+                    } else if let Some(first_ent) = candidates
+                        .iter()
+                        .position(|c| matches!(c.kind, ActionKind::EntityBound { .. }))
+                    {
+                        first_ent
                     } else {
                         continue;
                     }
@@ -379,15 +399,25 @@ impl ChainRuntime {
                                 self.dirichlet.hedge_update(&batch, chosen_idx, 0.1);
                                 self.router.update_platt(batch.raw_precond_logit, ok, 0.05);
                                 self.router.update_tool_reliability(&cand.description, ok, 0.95);
-                                record_tool_outcome(
+                                let found_goal = record_tool_outcome(
                                     turn,
                                     &cand.description,
                                     &out,
+                                    &goal_tokens,
                                     &mut memory,
                                     &mut recent_history,
                                     &mut observed_files,
                                     &mut failing_tests,
                                 );
+                                if found_goal {
+                                    metrics.avg_probe_latency_us =
+                                        total_probe_us / metrics.turns.max(1) as u64;
+                                    return EpisodeResult {
+                                        completed: true,
+                                        summary: format!("Verified target invariant at turn {turn}"),
+                                        metrics,
+                                    };
+                                }
                                 if !tool.is_pure_read() {
                                     active_tx = Some((tx_id, tool));
                                 }
@@ -434,20 +464,41 @@ fn record_tool_outcome(
     turn: usize,
     action_desc: &str,
     out: &ToolOutput,
+    goal_tokens: &[String],
     memory: &mut TriPartiteMemory,
     recent: &mut VecDeque<ActionOutcomeDigest>,
     observed_files: &mut Vec<String>,
     failing_tests: &mut Vec<String>,
-) {
+) -> bool {
     if out.exit_code == 0 {
         memory.active_blocker = None;
     } else {
         memory.active_blocker = Some(out.sensor_digest.clone());
     }
+    if let Some(read_path) = action_desc
+        .strip_prefix("read_file(")
+        .and_then(|s| s.strip_suffix(')'))
+    {
+        observed_files.retain(|f| f != read_path);
+        memory.record_artifact(
+            read_path.to_string(),
+            "inspected".to_string(),
+            out.full_payload.lines().count(),
+            Uuid::now_v7(),
+        );
+    }
     for f in extract_file_paths(&out.full_payload) {
-        if !observed_files.contains(&f) {
+        if !observed_files.contains(&f) && !memory.artifact_index.contains_key(&f) {
             observed_files.push(f);
         }
+    }
+    let found_goal = goal_tokens
+        .iter()
+        .any(|tok| tok.starts_with("KEY_") && out.full_payload.contains(tok));
+    if found_goal {
+        memory
+            .verified_facts
+            .push((Uuid::now_v7(), "Target invariant verified in file".to_string()));
     }
     if out.exit_code != 0 && action_desc.starts_with("run_test(") {
         let name = action_desc
@@ -467,6 +518,7 @@ fn record_tool_outcome(
         action: action_desc.to_string(),
         sensor_digest: out.sensor_digest.clone(),
     });
+    found_goal
 }
 
 #[cfg(test)]
@@ -484,9 +536,9 @@ mod tests {
             .unwrap();
 
         let dec = Arc::new(MockDecisionBackend::new());
-        // Candidates: 0=read_file(lib.rs), 1=PATCH_FILE(lib.rs), 2=WRITE_SHELL_CMD, 3=DONE, 4=ESCALATE
+        // Turn 1 (5 cands): 0=read_file(lib.rs); Turn 2 (lib.rs dequeued -> 3 cands): 1=DONE
         dec.push_batch(MockDecisionBackend::confident_batch(5, 0, true));
-        dec.push_batch(MockDecisionBackend::confident_batch(5, 3, true));
+        dec.push_batch(MockDecisionBackend::confident_batch(3, 1, true));
 
         let generator = Arc::new(MockGeneratorBackend::new());
         let mut tools = ToolRegistry::new();

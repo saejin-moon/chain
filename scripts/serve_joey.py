@@ -112,7 +112,7 @@ def create_app(model_id: str, device: str, dtype_str: str) -> FastAPI:
                 best_logit = max(last_logits[tid] for tid in candidates_tids)
                 choice_logits.append(best_logit)
 
-            probs = F.softmax(torch.stack(choice_logits), dim=0).tolist()
+            probs = F.softmax(torch.stack(choice_logits) / 0.35, dim=0).tolist()
             results[probe.id] = probs
 
         elapsed_ms = (time.perf_counter() - t0) * 1000.0

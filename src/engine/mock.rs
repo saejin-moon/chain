@@ -107,7 +107,8 @@ impl DecisionBackend for MockDecisionBackend {
         _probes: &[ProbeSpec],
         num_actions: usize,
     ) -> Result<ProbeLogitsBatch, EngineError> {
-        if let Some(batch) = self.scripted_batches.lock().unwrap().pop_front() {
+        if let Some(mut batch) = self.scripted_batches.lock().unwrap().pop_front() {
+            batch.num_actions = num_actions.max(1);
             return Ok(batch);
         }
         Ok(Self::confident_batch(num_actions.max(1), 0, true))

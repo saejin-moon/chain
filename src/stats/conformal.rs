@@ -111,15 +111,23 @@ impl ConformalEstimator {
         let mut set = SmallVec::<[usize; MAX_ACTIONS]>::new();
         let mut max_q = 0.0f64;
 
-        let mut top1_score = 1.0;
-        for i in 0..k {
-            let s_i = 1.0 - posterior_mean[i];
-            if s_i < top1_score {
-                top1_score = s_i;
+        let mut top1_prob = 1e-9f64;
+        for &p in posterior_mean.iter().take(k) {
+            if p > top1_prob {
+                top1_prob = p;
             }
+        }
+        let top1_score = 1.0 - top1_prob;
+
+        for i in 0..k {
+            // Relative non-conformity 1 - (p_i / p_top1) is scale-invariant across K=2..16 candidates:
+            // - Distinct winner => |C(S)| == 1 (FastPath)
+            // - 2-3 close contenders => |C(S)| in {2, 3} (Speculative)
+            // - Flat/uncertain => |C(S)| > 3 (System2Escalate)
+            let rel_nonconformity = 1.0 - (posterior_mean[i] / top1_prob);
             let q_hat = self.quantile_for_group(candidates[i].risk_group);
             max_q = max_q.max(q_hat);
-            if d_js < tau_ood && s_i <= q_hat {
+            if d_js < tau_ood && rel_nonconformity <= q_hat {
                 set.push(i);
             }
         }

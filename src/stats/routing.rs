@@ -143,11 +143,11 @@ impl BayesRouter {
         }
 
         let set_len = conf.prediction_set.len();
-        if set_len == 1 && cal_precond > 0.80 && net_gain_s2 <= 0.0 {
+        if set_len == 1 && cal_precond > 0.55 && (net_gain_s2 <= 0.0 || cand.reversible) {
             return RouteDecision::FastPath { action_idx: top1 };
         }
 
-        if (2..=3).contains(&set_len) && p_rev > 0.90 && cand.reversible {
+        if (2..=3).contains(&set_len) && p_rev > 0.50 && cand.reversible {
             return RouteDecision::Speculative { action_idx: top1 };
         }
 
