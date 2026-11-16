@@ -307,12 +307,13 @@ impl ChainRuntime {
                     metrics.system2_escalations += 1;
                     let idx = dir.top1_idx;
                     let cand = &candidates[idx];
-                    let prompt = build_scoped_synthesis_prompt(
+                    let mut prompt = build_scoped_synthesis_prompt(
                         tier0_sys2.clone(),
                         &memory,
                         cand,
                         counterfactual_hint.take().as_deref(),
                     );
+                    prompt.max_tokens = 96;
                     let abort = Arc::new(AtomicBool::new(false));
                     if let Ok(resp) = self
                         .generator_backend
@@ -329,7 +330,12 @@ impl ChainRuntime {
                             sensor_digest: resp.chars().take(120).collect(),
                         });
                     }
-                    continue;
+                    // If the top candidate is an entity-bound tool, still execute it after System-2 guidance
+                    if matches!(cand.kind, ActionKind::EntityBound { .. }) {
+                        idx
+                    } else {
+                        continue;
+                    }
                 }
                 RouteDecision::AskUser { reason } => {
                     metrics.avg_probe_latency_us = total_probe_us / metrics.turns.max(1) as u64;

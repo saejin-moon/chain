@@ -74,7 +74,7 @@ def generate_context_rot_needle_tasks(seed: int = 42, count: int = 10, materiali
             "task_id": task_id,
             "goal": f"Inspect workspace files, locate and verify target invariant {needle_code}, then finish.",
             "initial_files": initial_files,
-            "max_turns": 15,
+            "max_turns": 6,
         })
     return tasks
 
@@ -91,7 +91,7 @@ def post_episode(endpoint: str, goal: str, initial_files: List[str], max_turns: 
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=120) as resp:
+    with urllib.request.urlopen(req, timeout=600) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
