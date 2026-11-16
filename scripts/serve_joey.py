@@ -87,7 +87,7 @@ def create_app(model_id: str, device: str, dtype_str: str) -> FastAPI:
         prefix_out = model(input_ids=shared_ids, use_cache=True)
         base_kv = prefix_out.past_key_values
 
-        results: Dict[str, List[float]] = {}
+        raw_logits_map: Dict[str, torch.Tensor] = {}
         # 2. Evaluate each short suffix (~12 tokens) reusing cloned base_kv
         for probe in req.probes:
             suffix_ids = tokenizer(
@@ -112,11 +112,33 @@ def create_app(model_id: str, device: str, dtype_str: str) -> FastAPI:
                 best_logit = max(last_logits[tid] for tid in candidates_tids)
                 choice_logits.append(best_logit)
 
-            probs = F.softmax(torch.stack(choice_logits) / 0.35, dim=0).tolist()
+            raw_logits_map[probe.id] = torch.stack(choice_logits)
+
+        # Contextual prior calibration across choice probes (removes position-"A" token bias)
+        choice_probe_ids = [
+            pid for pid in ("p_fwd", "p_inv", "p_pert_1", "p_pert_2", "p_pert_3")
+            if pid in raw_logits_map
+        ]
+        if len(choice_probe_ids) >= 2:
+            mean_prior = torch.stack([raw_logits_map[pid] for pid in choice_probe_ids]).mean(dim=0)
+            for pid in choice_probe_ids:
+                if pid == "p_inv":
+                    # Inverse probe: flip deviation from prior so it doesn't falsely mirror p_fwd's argmax
+                    raw_logits_map[pid] = -(raw_logits_map[pid] - mean_prior)
+                else:
+                    raw_logits_map[pid] = raw_logits_map[pid] - 0.75 * mean_prior
+
+        results: Dict[str, List[float]] = {}
+        for probe in req.probes:
+            logits_vec = raw_logits_map[probe.id]
+            temp = 0.25 if probe.id.startswith("p_") else 0.50
+            probs = F.softmax(logits_vec / temp, dim=0).tolist()
             results[probe.id] = probs
 
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        print(f"[joey-1] evaluated {len(req.probes)} probes (1x prefix prefill) in {elapsed_ms:.1f}ms")
+        fwd_probs = results.get("p_fwd", [])
+        top_str = f"{max(fwd_probs):.2f}" if fwd_probs else "n/a"
+        print(f"[joey-1] evaluated {len(req.probes)} probes in {elapsed_ms:.1f}ms (top_p_fwd={top_str})")
         return {"results": results}
 
     return app

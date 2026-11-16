@@ -234,6 +234,14 @@ impl ChainRuntime {
             }
 
             let decision = self.router.route(&batch, &dir, &conf, &candidates);
+            tracing::info!(
+                turn,
+                ?decision,
+                conformal_len = conf.prediction_set.len(),
+                d_js = format!("{:.3}", dir.d_js),
+                top1 = %candidates[dir.top1_idx].description,
+                "CHAIN routing step"
+            );
             let chosen_idx = match decision {
                 RouteDecision::FastPath { action_idx } => {
                     metrics.fast_path_hits += 1;
@@ -371,9 +379,41 @@ impl ChainRuntime {
             let cand = &candidates[chosen_idx];
             match &cand.kind {
                 ActionKind::MetaDone => {
-                    if memory.ephemeral_turns.is_empty() && !observed_files.is_empty() && turn < max_turns {
-                        // Force at least one inspection turn before allowing DONE when files exist
-                        continue;
+                    if !observed_files.is_empty() && memory.verified_facts.is_empty() && turn < max_turns {
+                        // Force inspecting the next unread file rather than quitting before invariant verification
+                        if let Some(first_ent) = candidates
+                            .iter()
+                            .position(|c| matches!(c.kind, ActionKind::EntityBound { .. }))
+                        {
+                            let ent_cand = &candidates[first_ent];
+                            if let Some((tool_name, args)) = candidate_to_tool_call(ent_cand)
+                                && let Some(tool) = self.tools.get(&tool_name).cloned()
+                            {
+                                let tx_id = Uuid::now_v7();
+                                if let Ok(out) = tool.execute(args, tx_id).await {
+                                    let found_goal = record_tool_outcome(
+                                        turn,
+                                        &ent_cand.description,
+                                        &out,
+                                        &goal_tokens,
+                                        &mut memory,
+                                        &mut recent_history,
+                                        &mut observed_files,
+                                        &mut failing_tests,
+                                    );
+                                    if found_goal {
+                                        metrics.avg_probe_latency_us =
+                                            total_probe_us / metrics.turns.max(1) as u64;
+                                        return EpisodeResult {
+                                            completed: true,
+                                            summary: format!("Verified target invariant at turn {turn}"),
+                                            metrics,
+                                        };
+                                    }
+                                }
+                            }
+                            continue;
+                        }
                     }
                     metrics.avg_probe_latency_us = total_probe_us / metrics.turns.max(1) as u64;
                     return EpisodeResult {

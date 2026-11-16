@@ -165,26 +165,26 @@ impl Default for CalibrationData {
         let mut group_scores = FxHashMap::default();
         group_scores.insert(
             "pure_read".to_string(),
-            vec![0.01, 0.05, 0.10, 0.19, 0.30, 0.42],
+            vec![0.01, 0.02, 0.04, 0.06, 0.08, 0.10, 0.13, 0.16, 0.20, 0.25],
         );
         group_scores.insert(
             "fs_mutate".to_string(),
-            vec![0.03, 0.09, 0.16, 0.27, 0.48, 0.65],
+            vec![0.02, 0.04, 0.07, 0.10, 0.14, 0.18, 0.22, 0.27, 0.33, 0.40],
         );
         group_scores.insert(
             "shell".to_string(),
-            vec![0.05, 0.14, 0.25, 0.40, 0.68, 0.82],
+            vec![0.03, 0.06, 0.10, 0.14, 0.19, 0.24, 0.30, 0.36, 0.44, 0.52],
         );
         group_scores.insert(
             "network_api".to_string(),
-            vec![0.04, 0.13, 0.24, 0.39, 0.64, 0.79],
+            vec![0.03, 0.06, 0.09, 0.13, 0.18, 0.23, 0.29, 0.35, 0.42, 0.50],
         );
         Self {
             global_scores: vec![
-                0.02, 0.05, 0.08, 0.12, 0.18, 0.25, 0.31, 0.40, 0.52, 0.72, 0.85,
+                0.01, 0.03, 0.05, 0.08, 0.12, 0.16, 0.20, 0.25, 0.32, 0.42, 0.50,
             ],
             group_scores,
-            shrinkage_m: 20,
+            shrinkage_m: 5,
         }
     }
 }
